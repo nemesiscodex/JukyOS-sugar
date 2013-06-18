@@ -79,6 +79,21 @@ class AboutComputer(SectionView):
         vbox_identity.pack_start(box_identity, expand=False)
         box_identity.show()
 
+        box_lease = gtk.HBox(spacing=style.DEFAULT_SPACING)
+        label_lease = gtk.Label(_('Lease: '))
+        label_lease.set_alignment(1, 0)
+        label_lease.modify_fg(gtk.STATE_NORMAL,
+                              style.COLOR_SELECTION_GREY.get_gdk_color())
+        box_lease.pack_start(label_lease, expand=False)
+        self._group.add_widget(label_lease)
+        label_lease.show()
+        label_lease_ver = gtk.Label(self._model.get_lease_days())
+        label_lease_ver.set_alignment(0, 0)
+        box_lease.pack_start(label_lease_ver, expand=False)
+        label_lease_ver.show()
+        vbox_identity.pack_start(box_lease, expand=False)
+        box_lease.show()
+
         self._vbox.pack_start(vbox_identity, expand=False)
         vbox_identity.show()
 

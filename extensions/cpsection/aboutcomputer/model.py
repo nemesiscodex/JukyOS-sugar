@@ -23,6 +23,7 @@ from gettext import gettext as _
 import errno
 
 import dbus
+from datetime import datetime
 
 from jarabe import config
 
@@ -51,6 +52,19 @@ def get_aboutcomputer():
 
 def print_aboutcomputer():
     print get_aboutcomputer()
+
+def get_lease_days():
+    lease_file = _read_file('/security/lease.sig')
+    if lease_file == None: 
+        return 'Information not available!'
+    encoded_date = str(str.split(lease_file)[3])
+    expiry_date = datetime.strptime(encoded_date
+            , '%Y%m%dT%H%M%SZ')
+    current_date = datetime.today()
+    days_remaining = (expiry_date - current_date).days
+    #TODO: gettext str_days_remaining
+    str_days_remaining = str(days_remaining) + ' days remaining'	
+    return str_days_remaining
 
 
 def get_serial_number():
