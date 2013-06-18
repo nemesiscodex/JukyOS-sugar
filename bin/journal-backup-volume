@@ -1,0 +1,57 @@
+#!/usr/bin/env python
+# Copyright (C) 2010, Paraguay Educa <tecnologia@paraguayeduca.org>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+import os
+import sys
+import subprocess
+import logging
+
+from sugar import env
+#from sugar.datastore import datastore
+
+backup_identifier = sys.argv[2]
+volume_path = sys.argv[1]
+
+if len(sys.argv) != 3:
+    print 'Usage: %s <volume_path> <backup_identifier>' % sys.argv[0]
+    exit(1)
+
+logging.debug('Backup started')
+
+backup_path = os.path.join(volume_path, 'backup', backup_identifier)
+
+if not os.path.exists(backup_path):
+    os.makedirs(backup_path)
+
+#datastore.freeze()
+#subprocess.call(['pkill', '-9', '-f', 'python.*datastore-service'])
+
+result = 0
+try:
+    cmd = ['tar', '-C', env.get_profile_path(), '-czf', \
+           os.path.join(backup_path, 'datastore.tar.gz'), 'datastore']
+
+    subprocess.check_call(cmd)
+
+except Exception, e:
+    logging.error('Backup failed: %s', str(e))
+    result = 1
+
+#datastore.thaw()
+
+logging.debug('Backup finished')
+exit(result)
