@@ -30,6 +30,9 @@ import glib
 import gobject
 import gconf
 import dbus
+import random
+import re
+import uuid
 
 from sugar.graphics.icon import get_icon_state
 from sugar.graphics import style
@@ -39,6 +42,7 @@ from sugar.graphics.tray import TrayIcon
 from sugar.graphics.menuitem import MenuItem
 from sugar.graphics.icon import Icon
 from sugar.graphics import xocolor
+from sugar.util import unique_id
 from sugar import profile
 
 from jarabe.model import network
@@ -48,11 +52,19 @@ from jarabe.view.pulsingicon import PulsingIcon
 
 IP_ADDRESS_TEXT_TEMPLATE = _('IP address: %s')
 
+_NM_OBJ_PROPERTIES = 'org.freedesktop.DBus.Properties'
+
 _GSM_STATE_NOT_READY = 0
 _GSM_STATE_DISCONNECTED = 1
 _GSM_STATE_CONNECTING = 2
 _GSM_STATE_CONNECTED = 3
 _GSM_STATE_FAILED = 4
+_GSM_SHARING_PRIVATE = 0
+_GSM_SHARING_TRYING = 1
+_GSM_SHARING_NEIGHBORHOOD = 2
+_GSM_SHARING_CHANNELS = [2,3,4,5,7,8,9,10,12,13]
+
+_wifi_device = None
 
 
 class WirelessPalette(Palette):
@@ -196,6 +208,9 @@ class GsmPalette(Palette):
     __gsignals__ = {
         'gsm-connect': (gobject.SIGNAL_RUN_FIRST, gobject.TYPE_NONE, ([])),
         'gsm-disconnect': (gobject.SIGNAL_RUN_FIRST, gobject.TYPE_NONE, ([])),
+        'gsm-private': (gobject.SIGNAL_RUN_FIRST, gobject.TYPE_NONE, ([])),
+        'gsm-neighborhood': (gobject.SIGNAL_RUN_FIRST, gobject.TYPE_NONE,
+                                  ([]))
     }
 
     def __init__(self):
@@ -204,11 +219,16 @@ class GsmPalette(Palette):
 
         self._current_state = None
         self._failed_connection = False
+        self._sharing_state = _GSM_SHARING_PRIVATE
 
         self._toggle_state_item = MenuItem('')
         self._toggle_state_item.connect('activate', self.__toggle_state_cb)
         self.menu.append(self._toggle_state_item)
         self._toggle_state_item.show()
+
+        self._sharing_toggle_item = MenuItem('')
+        self._sharing_toggle_item.connect('activate', self.__sharing_toggle_cb)
+        self.menu.append(self._sharing_toggle_item)
 
         self.info_box = gtk.VBox()
 
@@ -294,6 +314,9 @@ class GsmPalette(Palette):
             icon = Icon(icon_name='media-eject', \
                             icon_size=gtk.ICON_SIZE_MENU)
             self._toggle_state_item.set_image(icon)
+            self.sharing_update_text()
+            self._sharing_toggle_item.show()
+            return
 
         elif self._current_state == _GSM_STATE_FAILED:
             message_error = self._get_error_by_nm_reason(reason)
@@ -301,6 +324,7 @@ class GsmPalette(Palette):
         else:
             raise ValueError('Invalid GSM state while updating label and ' \
                              'text, %s' % str(self._current_state))
+        self._sharing_toggle_item.hide()
 
     def __toggle_state_cb(self, menuitem):
         if self._current_state == _GSM_STATE_NOT_READY:
@@ -361,6 +385,37 @@ class GsmPalette(Palette):
             message = ''
         message_tuple = (network.get_error_by_reason(reason), message)
         return message_tuple
+    def sharing_update_text(self):
+        if self._sharing_state == _GSM_SHARING_PRIVATE:
+            self._sharing_toggle_item.get_child().set_label(_('Private (Click to share)'))
+            icon = Icon(icon_name='zoom-home', icon_size=gtk.ICON_SIZE_MENU)
+            self._sharing_toggle_item.set_image(icon)
+
+        elif self._sharing_state == _GSM_SHARING_TRYING:
+            self._sharing_toggle_item.get_child().set_label(_('Please wait...'))
+
+        elif self._sharing_state == _GSM_SHARING_NEIGHBORHOOD:
+            self._sharing_toggle_item.get_child().set_label(_('Neighborhood (Click to unshare)'))
+            icon = Icon(icon_name='zoom-neighborhood', icon_size=gtk.ICON_SIZE_MENU)
+            self._sharing_toggle_item.set_image(icon)
+
+        else:
+             raise ValueError('Invalid GSM sharing state while updating, %s' % \
+                             str(self._sharing_state))
+
+    def __sharing_toggle_cb(self, menuitem):
+        if self._sharing_state == _GSM_SHARING_PRIVATE:
+            self.emit('gsm-neighborhood')
+
+        elif self._sharing_state == _GSM_SHARING_TRYING:
+            pass
+
+        elif self._sharing_state == _GSM_SHARING_NEIGHBORHOOD:
+            self.emit('gsm-private')
+
+        else:
+             raise ValueError('Invalid GSM sharing state, %s' % \
+                             str(self._sharing_state))
 
 
 class WirelessDeviceView(ToolButton):
@@ -522,8 +577,16 @@ class WirelessDeviceView(ToolButton):
         else:
             state = network.NM_DEVICE_STATE_UNKNOWN
 
-        if self._mode != network.NM_802_11_MODE_ADHOC and \
-                network.is_sugar_adhoc_network(self._ssid) == False:
+        if self._mode == network.NM_802_11_MODE_ADHOC and \
+                network.is_sugar_adhoc_network(self._ssid):
+            channel = network.frequency_to_channel(self._frequency)
+            if state == network.NM_DEVICE_STATE_ACTIVATED:
+                self._icon.props.icon_name = 'network-adhoc-%s-connected' \
+                        % channel
+            else:
+                self._icon.props.icon_name = 'network-adhoc-%s' % channel
+            self._icon.props.base_color = profile.get_color()
+        else:
             if state == network.NM_DEVICE_STATE_ACTIVATED:
                 icon_name = '%s-connected' % 'network-wireless'
             else:
@@ -532,14 +595,6 @@ class WirelessDeviceView(ToolButton):
             icon_name = get_icon_state(icon_name, self._strength)
             if icon_name:
                 self._icon.props.icon_name = icon_name
-        else:
-            channel = network.frequency_to_channel(self._frequency)
-            if state == network.NM_DEVICE_STATE_ACTIVATED:
-                self._icon.props.icon_name = 'network-adhoc-%s-connected' \
-                        % channel
-            else:
-                self._icon.props.icon_name = 'network-adhoc-%s' % channel
-            self._icon.props.base_color = profile.get_color()
 
         if (state >= network.NM_DEVICE_STATE_PREPARE) and \
            (state <= network.NM_DEVICE_STATE_IP_CONFIG):
@@ -711,6 +766,8 @@ class GsmDeviceView(TrayIcon):
     def __init__(self, device):
         self._connection_time_handler = None
         self._connection_timestamp = 0
+        self._shared_connection = None
+        self._target_dev_path = None
 
         client = gconf.client_get_default()
         color = xocolor.XoColor(client.get_string('/desktop/sugar/user/color'))
@@ -737,6 +794,8 @@ class GsmDeviceView(TrayIcon):
         palette.set_group_id('frame')
         palette.connect('gsm-connect', self.__gsm_connect_cb)
         palette.connect('gsm-disconnect', self.__gsm_disconnect_cb)
+        palette.connect('gsm-neighborhood', self.__gsm_start_sharing_cb)
+        palette.connect('gsm-private', self.__gsm_stop_sharing_cb)
 
         self._palette = palette
 
@@ -853,6 +912,94 @@ class GsmDeviceView(TrayIcon):
             datetime.datetime.fromtimestamp(self._connection_timestamp)
         self._palette.update_connection_time(connection_time)
         return True
+
+    def __gsm_start_sharing_cb(self, palette):
+        if self._palette._sharing_state == _GSM_SHARING_PRIVATE:
+            logging.debug('GSM will start sharing now')
+            self._palette._sharing_state = _GSM_SHARING_TRYING
+            self._palette.sharing_update_text()
+
+            self._target_device = _wifi_device
+            self._target_device_path = self._target_device.object_path
+
+            client = gconf.client_get_default()
+            nick = client.get_string('/desktop/sugar/user/nick')
+            nick = re.sub('\W', '', nick)
+
+            name_format = '%s network'
+            format_length = len(name_format) - len('%s')
+            nick_length = 31 - format_length
+            name = name_format % nick[:nick_length]
+
+            connection = network.find_connection_by_ssid(name)
+            if connection == None:
+                settings = network.Settings()
+                settings.connection.id = name
+                settings.connection.uuid = str(uuid.uuid4())
+                settings.connection.type = '802-11-wireless'
+                settings.wireless.ssid = dbus.ByteArray(name)
+                settings.wireless.mode = 'adhoc'
+                settings.wireless.band = 'bg'
+                chosen_channel = random.randrange(len(_GSM_SHARING_CHANNELS))
+                settings.wireless.channel = _GSM_SHARING_CHANNELS[chosen_channel]
+                settings.ip4_config = network.IP4Config()
+                settings.ip4_config.method = 'shared'
+                network.add_and_activate_connection(self._target_device,
+                                                    settings,
+                                                    '/',
+                                                    self._gsm_sharing_ok_cb_for_add_and_activate,
+                                                    self._gsm_sharing_error_cb)
+            else:
+                network.activate_connection_by_path(connection.get_path(),
+                                                    self._target_device,
+                                                    self._gsm_sharing_ok_cb,
+                                                    self._gsm_sharing_error_cb)
+
+    def _gsm_sharing_ok_cb_for_add_and_activate(self,
+                                                new_connection_path,
+                                                active_connection_path):
+        self._gsm_sharing_ok_cb(active_connection_path)
+
+    def _gsm_sharing_ok_cb(self, connection_path):
+        logging.debug('GSM sharing is enabled')
+        self._shared_connection_path = connection_path
+        self._bus.add_signal_receiver(self._gsm_sharing_changed_cb,
+                                      signal_name='StateChanged',
+                                      path=self._target_device_path,
+                                      dbus_interface=network.NM_DEVICE_IFACE)
+        self._palette._sharing_state = _GSM_SHARING_NEIGHBORHOOD
+        self._palette.sharing_update_text()
+
+    def _gsm_sharing_changed_cb(self, new_state, old_state, reason):
+        if new_state == network.NM_DEVICE_STATE_DISCONNECTED:
+            self._gsm_sharing_reset()
+
+    def _gsm_sharing_reset(self):
+            logging.debug('GSM sharing is disabled')
+            if self._target_dev_path != None:
+                self._bus.remove_signal_receiver(self._gsm_sharing_changed_cb,
+                                                 signal_name='StateChanged',
+                                                 path=self._target_dev_path,
+                                                 dbus_interface=network.NM_DEVICE_IFACE)
+            self._shared_connection_path = None
+            self._target_dev_path = None
+            self._palette._sharing_state = _GSM_SHARING_PRIVATE
+            self._palette.sharing_update_text()
+
+    def _gsm_sharing_error_cb(self, error):
+        logging.debug('GSM sharing could not start: %s' % str(error))
+        self._gsm_sharing_reset()
+
+    def __gsm_stop_sharing_cb(self, palette):
+        logging.debug('GSM will stop sharing now')
+        network.get_manager().DeactivateConnection(self._shared_connection_path,
+                                                   reply_handler=self._gsm_stop_sharing_ok_cb,
+                                                   error_handler=self._gsm_stop_sharing_error_cb)
+    def __gsm_stop_sharing_ok_cb(self):
+        self._gsm_sharing_reset()
+
+    def __gsm_stop_sharing_error_cb(self):
+        logging.debug('GSM sharing could not stop')
 
 
 class WirelessDeviceObserver(object):
@@ -1031,6 +1178,8 @@ class NetworkManagerObserver(object):
             device = WiredDeviceObserver(nm_device, self._tray)
             self._devices[device_op] = device
         elif device_type == network.NM_DEVICE_TYPE_WIFI:
+            global _wifi_device
+            _wifi_device = nm_device
             device = WirelessDeviceObserver(nm_device, self._tray)
             self._devices[device_op] = device
         elif device_type == network.NM_DEVICE_TYPE_OLPC_MESH:
@@ -1049,6 +1198,9 @@ class NetworkManagerObserver(object):
             device.disconnect()
             del self._devices[device_op]
 
+def get_wifi_device():
+    global _wifi_device
+    return _wifi_device
 
 def setup(tray):
     device_observer = NetworkManagerObserver(tray)
