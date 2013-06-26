@@ -64,6 +64,10 @@ class BaseListView(gtk.Bin):
 
     __gsignals__ = {
         'clear-clicked': (gobject.SIGNAL_RUN_FIRST, gobject.TYPE_NONE, ([])),
+        'clear-clicked':    (gobject.SIGNAL_RUN_FIRST,
+                            gobject.TYPE_NONE, ([])),
+        'select-toggled':   (gobject.SIGNAL_RUN_FIRST,
+                            gobject.TYPE_NONE, ([bool]))
     }
 
     def __init__(self):
@@ -115,6 +119,12 @@ class BaseListView(gtk.Bin):
         model.updated.connect(self.__model_updated_cb)
         model.deleted.connect(self.__model_deleted_cb)
 
+        # Multi-selection stuff
+        self._selection_cache = set()
+
+    def get_mountpoint(self):
+        return self._query.get('mountpoints', [''])[0]
+
     def __model_created_cb(self, sender, signal, object_id):
         if self._is_new_item_visible(object_id):
             self._set_dirty()
@@ -134,9 +144,30 @@ class BaseListView(gtk.Bin):
         else:
             return object_id.startswith(self._query['mountpoints'][0])
 
+    def __selected_cb(self, cell, path):
+        self._model.toggle_selection(path)
+
+    def get_model(self):
+        return self._model
+
     def _add_columns(self):
+
+        cell_select = gtk.CellRendererToggle()
+        cell_select.props.indicator_size = style.zoom(26)
+        cell_select.props.activatable = True
+        cell_select.connect('toggled', self.__selected_cb)
+
+        column = gtk.TreeViewColumn()
+        column.props.sizing = gtk.TREE_VIEW_COLUMN_FIXED
+        column.props.fixed_width = style.GRID_CELL_SIZE
+        column.pack_start(cell_select)
+        column.add_attribute(cell_select, "active", ListModel.COLUMN_SELECT)
+        self.tree_view.append_column(column)
+
+
         cell_favorite = CellRendererFavorite(self.tree_view)
         cell_favorite.connect('clicked', self.__favorite_clicked_cb)
+
 
         column = gtk.TreeViewColumn()
         column.props.sizing = gtk.TREE_VIEW_COLUMN_FIXED
@@ -283,14 +314,34 @@ class BaseListView(gtk.Bin):
 
         if self._model is not None:
             self._model.stop()
+            self._manage_selection_cache()
         self._dirty = False
 
         self._model = ListModel(self._query)
+        self._model.connect('select', self.__model_select_cb)
         self._model.connect('ready', self.__model_ready_cb)
         self._model.connect('progress', self.__model_progress_cb)
         self._model.setup()
 
+    def _manage_selection_cache(self):
+        # Discard from cache elements that might not be selected anymore
+        self._selection_cache = \
+            self._selection_cache.difference(self._model._query_set_cache)
+        # Add to cache elements that are selected
+        self._selection_cache = \
+            self._selection_cache.union(self._model.get_selection())
+
+    def __model_select_cb(self, tree_model, status, refresh_view):
+        if refresh_view:
+            self._refresh_view(tree_model)
+        self.emit('select-toggled', status)
+
+
     def __model_ready_cb(self, tree_model):
+        self._model.add_selection(self._selection_cache)
+        self._refresh_view(tree_model)
+
+    def _refresh_view(self, tree_model):
         self._stop_progress_bar()
 
         self._scroll_position = self.tree_view.props.vadjustment.props.value
@@ -412,6 +463,8 @@ class BaseListView(gtk.Bin):
         self.remove(self.child)
         self.add(self._scrolled_window)
         self._scrolled_window.show()
+
+
 
     def update_dates(self):
         if not self.tree_view.flags() & gtk.REALIZED:

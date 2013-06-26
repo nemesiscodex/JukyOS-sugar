@@ -17,7 +17,9 @@
 
 import logging
 from gettext import gettext as _
+from gettext import ngettext
 import uuid
+import gobject
 
 import gtk
 import dbus
@@ -25,7 +27,8 @@ import statvfs
 import os
 
 from sugar.graphics.window import Window
-from sugar.graphics.alert import ErrorAlert
+from sugar.graphics.alert import Alert, ErrorAlert
+from sugar.graphics.icon import Icon
 
 from sugar.bundle.bundle import ZipExtractException, RegistrationException
 from sugar import env
@@ -34,6 +37,7 @@ from sugar import wm
 
 from jarabe.model import bundleregistry
 from jarabe.journal.journaltoolbox import MainToolbox, DetailToolbox
+from jarabe.journal.journaltoolbox import EditToolbox
 from jarabe.journal.listview import ListView
 from jarabe.journal.detailview import DetailView
 from jarabe.journal.volumestoolbar import VolumesToolbar
@@ -118,9 +122,12 @@ class JournalActivity(JournalWindow):
         self._secondary_view = None
         self._list_view = None
         self._detail_view = None
+        self._edit_toolbox = None
         self._main_toolbox = None
         self._detail_toolbox = None
         self._volumes_toolbar = None
+        self._editing_mode = False
+        self._editing_alert = None
 
         self._setup_main_view()
         self._setup_secondary_view()
@@ -141,6 +148,7 @@ class JournalActivity(JournalWindow):
         self._dbus_service = JournalActivityDBusService(self)
 
         self.iconify()
+        self._iconified = True
 
         self._critical_space_alert = None
         self._check_available_space()
@@ -172,6 +180,7 @@ class JournalActivity(JournalWindow):
         self._list_view.connect('detail-clicked', self.__detail_clicked_cb)
         self._list_view.connect('clear-clicked', self.__clear_clicked_cb)
         self._list_view.connect('volume-error', self.__volume_error_cb)
+        self._list_view.connect('select-toggled', self.__select_toggled_cb) 
         self._main_view.pack_start(self._list_view)
         self._list_view.show()
 
@@ -185,6 +194,14 @@ class JournalActivity(JournalWindow):
         search_toolbar.connect('query-changed', self._query_changed_cb)
         search_toolbar.set_mount_point('/')
 
+        self._edit_toolbox = EditToolbox()
+        edit_toolbar = self._edit_toolbox.edit_toolbar
+        edit_toolbar.connect('edit-none', self.__edit_none_activated_cb)
+        edit_toolbar.connect('edit-all', self.__edit_all_activated_cb)
+        edit_toolbar.connect('edit-erase', self.__edit_erase_activated_cb)
+        edit_toolbar.connect('edit-copy', self.__edit_copy_activated_cb)
+
+
     def _setup_secondary_view(self):
         self._secondary_view = gtk.VBox()
 
@@ -197,6 +214,85 @@ class JournalActivity(JournalWindow):
         self._secondary_view.pack_end(self._detail_view)
         self._detail_view.show()
 
+    def __edit_none_activated_cb(self, toolbar):
+        list_model = self._list_view.get_model()
+        list_model.set_selection_none()
+
+    def __edit_all_activated_cb(self, toolbar):
+        list_model = self._list_view.get_model()
+        list_model.set_selection_all()
+
+    def _remove_editing_alert(self):
+        if self._editing_alert is not None:
+            self.remove_alert(self._editing_alert)
+        self._editing_alert = None
+
+    def _add_editing_alert(self, title, message, operation, callback, data):
+        cancel_icon = Icon(icon_name='dialog-cancel')
+        ok_icon = Icon(icon_name='dialog-ok')
+
+        alert = Alert()
+        alert.props.title = title
+        alert.props.msg = message
+        alert.add_button(gtk.RESPONSE_CANCEL, _('Cancel'), cancel_icon)
+        alert.add_button(gtk.RESPONSE_OK, operation, ok_icon)
+        alert.connect('response', callback, data)
+        alert.show()
+
+        self._remove_editing_alert()
+        self._editing_alert = alert
+        self.add_alert(alert)
+
+    def __edit_erase_activated_cb(self, toolbar):
+        list_model = self._list_view.get_model()
+        entries_set = list_model.get_selection()
+        entries_len = len(entries_set)
+
+        message = ngettext('Do you want to erase %d entry?',
+                            'Do you want to erase %d entries?',
+                            entries_len) % entries_len
+
+        self._add_editing_alert(_('Confirm erase'), message, _('Erase'),
+                                self.__edit_erase_confirm_cb, entries_set)
+
+    def __edit_erase_confirm_cb(self, alert, response_id, entries_set):
+        self._remove_editing_alert()
+        if response_id == gtk.RESPONSE_OK:
+            gobject.idle_add(self._edit_erase_selection, entries_set)
+
+    def _edit_erase_selection(self, entries_set):
+        mount_path = self._list_view.get_mountpoint()
+        model.delete_entries(entries_set, mount_path)
+
+    def __edit_copy_activated_cb(self, toolbar, mount_info, mount_path):
+        list_model = self._list_view.get_model()
+        entries_set = list_model.get_selection()
+        entries_len = len(entries_set)
+
+        message = ngettext('Do you want to copy %d entry to %s?',
+                            'Do you want to copy %d entries to %s?',
+                            entries_len) % (entries_len, mount_info)
+
+        self._add_editing_alert(_('Confirm copy'), message, _('Copy'),
+                self.__edit_copy_confirm_cb, (entries_set, mount_path))
+
+    def __edit_copy_confirm_cb(self, alert, response_id, data):
+        entries_set, mount_path = data
+        self._remove_editing_alert()
+        if response_id == gtk.RESPONSE_OK:
+            gobject.idle_add(self._edit_copy_selection,
+                            entries_set, mount_path)
+
+    def _edit_copy_selection(self, entries_set, mount_path):
+        status, message = model.copy_entries(entries_set, mount_path)
+
+        if status is False:
+            alert = ErrorAlert(title=_('Copying error'), msg=message)
+            alert.connect('response', self.__alert_response_cb)
+            alert.show()
+            self.add_alert(alert)
+
+
     def _key_press_event_cb(self, widget, event):
         keyname = gtk.gdk.keyval_name(event.keyval)
         if keyname == 'Escape':
@@ -208,6 +304,15 @@ class JournalActivity(JournalWindow):
     def __clear_clicked_cb(self, list_view):
         self._main_toolbox.search_toolbar.clear_query()
 
+    def __select_toggled_cb(self, list_view, mode):
+        logging.debug('Selection mode is %s', str(mode))
+        self._editing_mode = mode
+
+        # HACK: Don't exit detail view
+        if self.toolbar_box != self._detail_toolbox:
+            self.show_main_view()
+
+
     def __go_back_clicked_cb(self, detail_view):
         self.show_main_view()
 
@@ -216,15 +321,28 @@ class JournalActivity(JournalWindow):
         self.show_main_view()
 
     def show_main_view(self):
-        if self.toolbar_box != self._main_toolbox:
-            self.set_toolbar_box(self._main_toolbox)
-            self._main_toolbox.show()
+        self._remove_editing_alert()
 
+        if self._editing_mode:
+            #HACK: Hide current mount point copy-to option
+            mount_point = self._list_view.get_mountpoint()
+            edit_toolbar = self._edit_toolbox.edit_toolbar
+            edit_toolbar.arrange_copy_options(mount_point)
+
+            toolbox = self._edit_toolbox
+        else:
+            toolbox = self._main_toolbox
+
+        if self.toolbar_box != toolbox:
+            self.set_toolbar_box(toolbox)
+            toolbox.show()
         if self.canvas != self._main_view:
             self.set_canvas(self._main_view)
             self._main_view.show()
 
     def _show_secondary_view(self, object_id):
+        self._remove_editing_alert()
+
         metadata = model.get(object_id)
         try:
             self._detail_toolbox.entry_toolbar.set_metadata(metadata)
@@ -322,11 +440,15 @@ class JournalActivity(JournalWindow):
         logging.debug('window_state_event_cb %r', self)
         if event.changed_mask & gtk.gdk.WINDOW_STATE_ICONIFIED:
             state = event.new_window_state
-            visible = not state & gtk.gdk.WINDOW_STATE_ICONIFIED
+            self._iconified = state & gtk.gdk.WINDOW_STATE_ICONIFIED
+            visible = not self._iconified            
             self._list_view.set_is_visible(visible)
+
 
     def __visibility_notify_event_cb(self, window, event):
         logging.debug('visibility_notify_event_cb %r', self)
+        if self._iconified:
+            return
         visible = event.state != gtk.gdk.VISIBILITY_FULLY_OBSCURED
         self._list_view.set_is_visible(visible)
 

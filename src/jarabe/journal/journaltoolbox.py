@@ -526,6 +526,182 @@ class EntryToolbar(gtk.Toolbar):
             palette.menu.append(menu_item)
             menu_item.show()
 
+class EditToolbox(Toolbox):
+    def __init__(self):
+        Toolbox.__init__(self)
+
+        self.edit_toolbar = EditToolbar()
+        self.add_toolbar('', self.edit_toolbar)
+        self.edit_toolbar.show()
+
+
+class EditToolbar(gtk.Toolbar):
+
+    __gsignals__ = {
+        'edit-none':    (gobject.SIGNAL_RUN_FIRST,
+                        gobject.TYPE_NONE, ([])),
+        'edit-all':     (gobject.SIGNAL_RUN_FIRST,
+                        gobject.TYPE_NONE, ([])),
+        'edit-erase':  (gobject.SIGNAL_RUN_FIRST,
+                        gobject.TYPE_NONE, ([])),
+        'edit-copy':    (gobject.SIGNAL_RUN_FIRST,
+                        gobject.TYPE_NONE, ([str, str]))
+    }
+
+    def __init__(self):
+        gtk.Toolbar.__init__(self)
+
+        none_button = ToolButton('select-none')
+        none_button.set_tooltip(_('Select none'))
+        none_button.connect('clicked', self.__none_clicked_cb)
+        none_button.show()
+        self.add(none_button)
+
+        all_button = ToolButton('select-all')
+        all_button.set_tooltip(_('Select all'))
+        all_button.connect('clicked', self.__all_clicked_cb)
+        all_button.show()
+        self.add(all_button)
+
+        separator = gtk.SeparatorToolItem()
+        separator.show()
+        self.add(separator)
+
+        erase_button = ToolButton('edit-delete')
+        erase_button.set_tooltip(_('Erase'))
+        erase_button.connect('clicked', self.__erase_clicked_cb)
+        erase_button.show()
+        self.add(erase_button)
+
+        self._copy_button = EditCopyButton()
+        self._copy_button.connect('button-edit-copy', self.__copy_clicked_cb)
+        self._copy_button.show()
+        self.add(self._copy_button)
+
+    def __none_clicked_cb(self, button):
+        logging.debug('Edit toolbar emitting none signal')
+        self.emit('edit-none')
+
+    def __all_clicked_cb(self, button):
+        logging.debug('Edit toolbar emitting all signal')
+        self.emit('edit-all')
+
+    def __erase_clicked_cb(self, button):
+        logging.debug('Edit toolbar emitting erase signal')
+        self.emit('edit-erase')
+
+    def __copy_clicked_cb(self, button, mount_info, mount_path):
+        logging.debug('Edit toolbar emitting copy signal')
+        self.emit('edit-copy', mount_info, mount_path)
+
+    def arrange_copy_options(self, mount_path):
+        self._copy_button.arrange_options(mount_path)
+
+
+class EditCopyButton(ToolButton):
+    __gtype_name__ = 'JournalEditCopyButton'
+
+    __gsignals__ = {
+        'button-edit-copy': (gobject.SIGNAL_RUN_FIRST,
+                            gobject.TYPE_NONE,
+                            ([str, str]))
+    }
+
+    _MIN_ITEMS = 2
+
+    def __init__(self):
+        ToolButton.__init__(self)
+
+        self.props.tooltip = _('Copy to')
+        self.props.icon_name = 'edit-copy'
+
+        self._empty_item = MenuItem(_('No options available'))
+        self._empty_item.set_sensitive(False)
+        self.props.palette.menu.insert(self._empty_item, -1)
+        self._empty_item.show()
+
+        self._add_menuitem('activity-journal', _('the journal'), '/')
+
+        monitor = gio.volume_monitor_get()
+        for mount in monitor.get_mounts():
+            self._add_menuitem_mount(mount)
+        self._check_availability()
+
+        self._mount_added_hid = monitor.connect('mount-added',
+                                self.__mount_added_cb)
+        self._mount_removed_hid = monitor.connect('mount-removed',
+                                self.__mount_removed_cb)
+        self.connect('clicked', self.__show_options_palette_cb)
+
+    def __destroy_cb(self, button):
+        monitor = gio.volume_monitor_get()
+        monitor.disconnect(self._mount_added_hid)
+        monitor.disconnect(self._mount_removed_hid)
+
+    def __mount_added_cb(self, monitor, mount):
+        self._add_menuitem_mount(mount)
+        self._check_availability()
+
+    def __mount_removed_cb(self, monitor, mount):
+        mount_path = mount.get_root().get_path()
+        menu = self.props.palette.menu
+        for item in menu.get_children():
+            if not isinstance(item, EditCopyItem):
+                continue
+            if mount_path == item.mount_path:
+                menu.remove(item)
+        self._check_availability()
+
+    def __show_options_palette_cb(self, button):
+        self.props.palette.popup(immediate=True, state=1)
+
+    def __copy_activated_cb(self, item):
+        self.emit('button-edit-copy', item.mount_info, item.mount_path)
+
+    def _add_menuitem(self, icon_name, label, mount):
+        item = EditCopyItem(icon_name=icon_name,
+                            text_label=label,
+                            mount_path=mount)
+        item.connect('activate', self.__copy_activated_cb)
+        item.show()
+        self.props.palette.menu.insert(item, -1)
+
+    def _add_menuitem_mount(self, mount):
+        icon_theme = gtk.icon_theme_get_default()
+        for name in mount.get_icon().props.names:
+            if icon_theme.has_icon(name):
+                icon_name=name
+                break
+        self._add_menuitem(icon_name,
+                mount.get_name(),
+                mount.get_root().get_path())
+
+    def _check_availability(self):
+        menu_items = self.props.palette.menu.get_children()
+        if len(menu_items) > self._MIN_ITEMS:
+            self._empty_item.hide()
+        else:
+            self._empty_item.show()
+
+    def arrange_options(self, mount_path):
+        menu_items = self.props.palette.menu.get_children()
+        for item in menu_items:
+            if not isinstance(item, EditCopyItem):
+                continue
+            if mount_path == item.mount_path:
+                item.hide()
+            else:
+                item.show()
+
+
+class EditCopyItem(MenuItem):
+    __gtype_name__ = 'JournalEditCopyItem'
+
+    def __init__(self, icon_name, text_label, mount_path):
+        MenuItem.__init__(self, icon_name=icon_name, text_label=text_label)
+        self.mount_path = mount_path
+        self.mount_info = text_label
+
 
 class SortingButton(ToolButton):
     __gtype_name__ = 'JournalSortingButton'

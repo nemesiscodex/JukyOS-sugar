@@ -57,6 +57,16 @@ created = dispatch.Signal()
 updated = dispatch.Signal()
 deleted = dispatch.Signal()
 
+_sync_signals_enabled = True
+def _emit_created(object_id):
+    global _sync_signals_enabled
+    if _sync_signals_enabled:
+        created.send(None, object_id=object_id)
+
+def _emit_deleted(object_id):
+    global _sync_signals_enabled
+    if _sync_signals_enabled:
+        deleted.send(None, object_id=object_id)
 
 class _Cache(object):
 
@@ -420,6 +430,43 @@ class InplaceResultSet(BaseResultSet):
             self._pending_files.append(dir_path + '/' + entry)
         return
 
+def _set_signals_state(state, callback=None, data=None):
+    global _sync_signals_enabled
+    _sync_signals_enabled = state
+    if callback:
+        callback(data)
+
+def copy_entries(entries_set, mount_point):
+    _set_signals_state(False)
+    status, message = True, ''
+    for entry_uid  in entries_set:
+        try:
+            metadata = get(entry_uid)
+            copy(metadata, mount_point)
+        except ValueError:
+            logging.warning('Entry %s has nothing to copied', entry_uid)
+        except (OSError, IOError):
+            status, message = False, _('No available space to continue')
+            break
+    gobject.idle_add(_set_signals_state, True)
+    return (status, message)
+
+def delete_entries(entries_set, mount_point):
+    _set_signals_state(False)
+    for entry_uid in entries_set:
+        try:
+            delete(entry_uid)
+        except (OSError, IOError):
+            logging.warning('Entry %s could not be deleted', entry_uid)
+    gobject.idle_add(_set_signals_state, True,
+                     __post_delete_entries_cb, mount_point)
+
+def __post_delete_entries_cb(mount_point):
+    if mount_point is '/':
+        mount_point = 'abcde'
+    _emit_deleted(mount_point)
+
+
 
 def _get_file_metadata(path, stat, fetch_preview=True):
     """Return the metadata from the corresponding file.
@@ -504,16 +551,14 @@ def _get_datastore():
 
 
 def _datastore_created_cb(object_id):
-    created.send(None, object_id=object_id)
-
+    _emit_created(object_id)
 
 def _datastore_updated_cb(object_id):
     updated.send(None, object_id=object_id)
 
 
 def _datastore_deleted_cb(object_id):
-    deleted.send(None, object_id=object_id)
-
+    _emit_deleted(object_id)
 
 def find(query_, page_size):
     """Returns a ResultSet
@@ -611,7 +656,7 @@ def delete(object_id):
                 except EnvironmentError:
                     logging.error('Could not remove metadata=%s '
                                   'for file=%s', old_file, filename)
-        deleted.send(None, object_id=object_id)
+        _emit_deleted(object_id)
 
 
 def copy(metadata, mount_point):
@@ -746,7 +791,7 @@ def _write_entry_on_external_device(metadata, file_path):
                                          metadata_dir_path)
 
     object_id = destination_path
-    created.send(None, object_id=object_id)
+    _emit_created(object_id)
 
     return object_id
 

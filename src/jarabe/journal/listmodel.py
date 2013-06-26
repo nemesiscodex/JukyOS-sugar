@@ -40,6 +40,7 @@ class ListModel(gtk.GenericTreeModel, gtk.TreeDragSource):
     __gsignals__ = {
         'ready': (gobject.SIGNAL_RUN_FIRST, gobject.TYPE_NONE, ([])),
         'progress': (gobject.SIGNAL_RUN_FIRST, gobject.TYPE_NONE, ([])),
+        'select': (gobject.SIGNAL_RUN_FIRST, gobject.TYPE_NONE, ([bool, bool]))
     }
 
     COLUMN_UID = 0
@@ -54,6 +55,7 @@ class ListModel(gtk.GenericTreeModel, gtk.TreeDragSource):
     COLUMN_BUDDY_1 = 9
     COLUMN_BUDDY_2 = 10
     COLUMN_BUDDY_3 = 11
+    COLUMN_SELECT = 12
 
     _COLUMN_TYPES = {
         COLUMN_UID: str,
@@ -68,9 +70,10 @@ class ListModel(gtk.GenericTreeModel, gtk.TreeDragSource):
         COLUMN_BUDDY_1: object,
         COLUMN_BUDDY_3: object,
         COLUMN_BUDDY_2: object,
+        COLUMN_SELECT: bool
     }
 
-    _PAGE_SIZE = 10
+    _PAGE_SIZE = 500
 
     def __init__(self, query):
         gobject.GObject.__init__(self)
@@ -79,6 +82,10 @@ class ListModel(gtk.GenericTreeModel, gtk.TreeDragSource):
         self._cached_row = None
         self._result_set = model.find(query, ListModel._PAGE_SIZE)
         self._temp_drag_file_path = None
+
+        # Multi-selection stuff
+        self._selection = set()
+        self._query_set_cache = set()
 
         # HACK: The view will tell us that it is resizing so the model can
         # avoid hitting D-Bus and disk.
@@ -119,6 +126,11 @@ class ListModel(gtk.GenericTreeModel, gtk.TreeDragSource):
             return None
 
         if index == self._last_requested_index:
+            # HACK: avoid redrawing the whole view just for one row
+            selected = (self._cached_row[ListModel.COLUMN_UID] \
+                       in self._selection)
+            self._cached_row[ListModel.COLUMN_SELECT] = selected
+
             return self._cached_row[column]
 
         if index >= self._result_set.length:
@@ -197,6 +209,9 @@ class ListModel(gtk.GenericTreeModel, gtk.TreeDragSource):
                     continue
 
             self._cached_row.append(None)
+        selected = (metadata['uid'] in self._selection)
+        self._cached_row.append(selected)
+
 
         return self._cached_row[column]
 
@@ -241,3 +256,45 @@ class ListModel(gtk.GenericTreeModel, gtk.TreeDragSource):
             return True
 
         return False
+
+    def _get_query_set(self):
+        if self._query_set_cache:
+            return self._query_set_cache
+        query_set = set()
+        def collect(model, path, iter):
+            query_set.add(model[path][ListModel.COLUMN_UID])
+        self.foreach(collect)
+        self._query_set_cache = query_set
+        return query_set
+
+    def get_selection(self):
+        return self._selection.copy()
+
+    def add_selection(self, selection):
+        if type(selection) is set:
+            query_set = self._get_query_set()
+            selection = selection.intersection(query_set)
+            self._selection = self._selection.union(selection)
+        self._emit_select()
+
+    def set_selection_all(self):
+        query_set = self._get_query_set()
+        self._selection = self._selection.union(query_set)
+        self._emit_select(refresh_view=True)
+
+    def set_selection_none(self):
+        self._selection = set()
+        self._emit_select(refresh_view=True)
+
+    def toggle_selection(self, path):
+        uid = self[path][ListModel.COLUMN_UID]
+        if uid in self._selection:
+           self._selection.discard(uid)
+        else:
+            self._selection.add(uid)
+        self._emit_select()
+
+    def _emit_select(self, refresh_view=False):
+        status = not (not self._selection)
+        self.emit('select', status, refresh_view)
+
