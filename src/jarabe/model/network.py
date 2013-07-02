@@ -907,13 +907,14 @@ def activate_connection_by_path(connection, device_o,
                                      error_handler=error_handler)
 
 
-def add_and_activate_connection(device_o, settings, specific_object):
+def add_and_activate_connection(device_o, settings, specific_object,
+                                reply_handler=_add_and_activate_reply_cb,
+                                error_handler=_add_and_activate_error_cb):
     manager = get_manager()
     manager.AddAndActivateConnection(settings.get_dict(), device_o,
                                      specific_object,
-                                     reply_handler=_add_and_activate_reply_cb,
-                                     error_handler=_add_and_activate_error_cb)
-
+                                     reply_handler=reply_handler,
+                                     error_handler=error_handler)
 
 def _migrate_old_wifi_connections():
     """Migrate connections.cfg from Sugar-0.94 and previous to NetworkManager
