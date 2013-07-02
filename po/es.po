@@ -1927,4 +1927,18 @@ msgstr "Respaldar Diario"
 msgid "School Server"
 msgstr "Servidor Escuela"
 
+#: ../src/jarabe/journal/journaltoolbox.py:555
+msgid "Select none"
+msgstr "Borrar selección"
 
+#: ../src/jarabe/journal/journaltoolbox.py:555
+msgid "Select all"
+msgstr "Seleccionar todo"
+
+#: ../src/jarabe/journal/journaltoolbox.py:618
+msgid "No options available"
+msgstr "No hay opciones disponibles"
+
+#: ../src/jarabe/journal/journaltoolbox.py:623
+msgid "the journal"
+msgstr "el diario"
