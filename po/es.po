@@ -1524,7 +1524,7 @@ msgstr "Empezar con"
 msgid "No activity to start entry"
 msgstr "No se encontró una actividad para iniciar la entrada"
 
-#: ../src/jarabe/journal/palettes.py:112
+# ../src/jarabe/journal/palettes.py:112
 msgid "Send to"
 msgstr "Enviar a"
 
@@ -1942,3 +1942,11 @@ msgstr "No hay opciones disponibles"
 #: ../src/jarabe/journal/journaltoolbox.py:623
 msgid "the journal"
 msgstr "el diario"
+
+#: ../extensions/deviceicon/network.py:390
+msgid "Private (Click to share)"
+msgstr "Privado (Click para compartir)"
+
+#: ../extensions/deviceicon/network.py:398
+msgid "Neighborhood (Click to unshare)"
+msgstr "Vecindario (Click para dejar de compartir)"
