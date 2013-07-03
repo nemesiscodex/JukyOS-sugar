@@ -206,6 +206,8 @@ class CopyMenu(gtk.Menu):
         volume_monitor = gio.volume_monitor_get()
         icon_theme = gtk.icon_theme_get_default()
         for mount in volume_monitor.get_mounts():
+            if not hasattr(mount.get_icon().props, 'names'):
+                continue
             if self._metadata['mountpoint'] == mount.get_root().get_path():
                 continue
             volume_menu = VolumeMenu(self._metadata, mount.get_name(),
