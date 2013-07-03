@@ -56,7 +56,7 @@ def print_aboutcomputer():
 def get_lease_days():
     lease_file = _read_file('/security/lease.sig')
     if lease_file == None: 
-        return 'Information not available!'
+        return _('Information not available!')
     encoded_date = str(str.split(lease_file)[3])
     expiry_date = datetime.strptime(encoded_date
             , '%Y%m%dT%H%M%SZ')

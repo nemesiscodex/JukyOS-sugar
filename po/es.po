@@ -1950,3 +1950,11 @@ msgstr "Privado (Click para compartir)"
 #: ../extensions/deviceicon/network.py:398
 msgid "Neighborhood (Click to unshare)"
 msgstr "Vecindario (Click para dejar de compartir)"
+
+#: ../extensions/deviceicon/network.py:353
+msgid "reboot XO"
+msgstr "reinicie la XO"
+
+#: ../extensions/cpsection/aboutcomputer/model.py:59
+msgid "Information not available!"
+msgstr "Información no disponible"

@@ -349,7 +349,8 @@ class GsmPalette(Palette):
         title = _('Error: %s') % error
         self.error_title_label.set_markup('<b>%s</b>' % title)
         self.error_title_label.show()
-
+        if not suggestion:
+            suggestion = _('reboot XO')
         message = _('Suggestion: %s') % suggestion
         self.error_description_label.set_text(message)
         self.error_description_label.show()
