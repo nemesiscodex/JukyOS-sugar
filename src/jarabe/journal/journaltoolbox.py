@@ -476,6 +476,8 @@ class EntryToolbar(gtk.Toolbar):
         volume_monitor = gio.volume_monitor_get()
         icon_theme = gtk.icon_theme_get_default()
         for mount in volume_monitor.get_mounts():
+            if not hasattr(mount.get_icon().props, 'names'):
+                continue
             if self._metadata['mountpoint'] == mount.get_root().get_path():
                 continue
             volume_menu = VolumeMenu(self._metadata, mount.get_name(),
@@ -668,6 +670,8 @@ class EditCopyButton(ToolButton):
 
     def _add_menuitem_mount(self, mount):
         icon_theme = gtk.icon_theme_get_default()
+        if not hasattr(mount.get_icon().props, 'names'):
+            return
         for name in mount.get_icon().props.names:
             if icon_theme.has_icon(name):
                 icon_name=name

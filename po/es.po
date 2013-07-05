@@ -1958,3 +1958,7 @@ msgstr "reinicie la XO"
 #: ../extensions/cpsection/aboutcomputer/model.py:59
 msgid "Information not available!"
 msgstr "Información no disponible"
+
+#: ../src/jarabe/journal/processdialog.py:257
+msgid ", please close all the running activities."
+msgstr ", por favor cierre todas las actividades."
