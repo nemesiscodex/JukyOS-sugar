@@ -8,6 +8,8 @@ sugar_DATA =                        \
 	module-language.svg             \
 	module-modemconfiguration.svg	\
 	module-network.svg              \
-	module-power.svg
+	module-power.svg                \
+        select-all.svg                  \
+        select-none.svg
 
 EXTRA_DIST = $(sugar_DATA)
